@@ -1,0 +1,573 @@
+# =============================================================================
+# COMPLETE MUSUBI TUNER CONFIGURATION - ALL OPTIONS EXPLAINED
+# This config shows EVERY possible command-line option with explanations
+# Usage: python train.py config_complete_example.toml
+# =============================================================================
+
+# =============================================================================
+# RUNNER CONFIGURATION - Controls wrapper behavior
+# =============================================================================
+[runner]
+# Framework to use - determines script names (wan_*.py, hv_*.py, flux_*.py, etc)
+framework = "wan"
+
+# Skip caching steps if already done (saves time on reruns)
+skip_cache = false
+
+# Use UV package manager instead of plain python
+use_uv = true
+
+# CUDA version for UV (cu124 for CUDA 12.4, cu128 for CUDA 12.8)
+cuda_extra = "cu124"
+
+# =============================================================================
+# PATHS - Script locations (auto-generated if not specified)
+# =============================================================================
+[paths]
+# Custom script paths - only specify if different from defaults
+# Default pattern: src/musubi_tuner/{framework}_{script_type}.py
+# wan_cache_latents_script = "custom/path/to/cache_latents.py"
+# wan_cache_text_encoder_outputs_script = "custom/path/to/cache_text_encoder.py"
+# wan_train_network_script = "custom/path/to/train_network.py"
+
+# =============================================================================
+# LATENT CACHING CONFIGURATION
+# Converts images/videos to latent representations for faster training
+# =============================================================================
+[cache_latents]
+# Path to dataset configuration TOML file
+dataset_config = "dataset_config.toml"
+
+# Path to VAE model file (.pt or .safetensors)
+vae = "models/vae/wan_2.1_vae.safetensors"
+
+# Chunk size for CausalConv3d in VAE (higher = more VRAM, faster processing)
+vae_chunk_size = 32
+
+# Enable spatial tiling for VAE (reduces VRAM usage for large images)
+vae_tiling = true
+
+# Minimum tile size for spatial tiling (smaller = less VRAM, slower)
+vae_spatial_tile_sample_min_size = 256
+
+# Processing device (cuda, cpu, or specific GPU like cuda:0)
+device = "cuda"
+
+# Batch size for processing (higher = more VRAM, faster processing)
+batch_size = 1
+
+# Data type for VAE processing (fp16, fp32, bf16)
+vae_dtype = "fp16"
+
+# Number of worker processes (0 = auto, based on CPU cores)
+num_workers = 0
+
+# Skip processing files that already have cache entries
+skip_existing = true
+
+# Keep all cache files (don't auto-delete unused ones)
+keep_cache = false
+
+# Debug mode: "image" shows images in window, "console" shows in terminal, "video" saves preview
+debug_mode = ""
+
+# Console display settings (for debug_mode = "console")
+console_width = 120
+console_back = "black"
+console_num_images = 16
+
+# =============================================================================
+# TEXT ENCODER CACHING CONFIGURATION
+# Pre-processes text captions for faster training
+# =============================================================================
+[cache_text_encoder]
+# Path to dataset configuration TOML file
+dataset_config = "dataset_config.toml"
+
+# Text encoder model paths (framework-specific)
+# For WAN: T5 model
+t5 = "models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth"
+
+# For HunyuanVideo: dual encoders
+# text_encoder1 = "models/text_encoders/llava_llama3_fp16.safetensors"  # LLM
+# text_encoder2 = "models/text_encoders/clip_l.safetensors"            # CLIP
+
+# Batch size for text processing
+batch_size = 16
+
+# Processing device
+device = "cuda"
+
+# Data type for text encoder (fp16, fp32, bf16)
+dtype = "fp16"
+
+# Use FP8 for LLM (saves VRAM but may affect quality)
+fp8_llm = false
+
+# Number of worker processes
+num_workers = 0
+
+# Skip files that already have cached text encodings
+skip_existing = false
+
+# Keep all cache files
+keep_cache = false
+
+# =============================================================================
+# ACCELERATE CONFIGURATION - Controls distributed training
+# =============================================================================
+[accelerate]
+# Number of CPU threads per process (1 recommended for single GPU)
+num_cpu_threads_per_process = 1
+
+# Mixed precision training (fp16, bf16, no)
+# fp16: fastest, least memory, some models may be unstable
+# bf16: balanced, most compatible
+# no: slowest, most memory, most stable
+mixed_precision = "fp16"
+
+# Multi-GPU settings (uncomment if using multiple GPUs)
+# num_processes = 2                    # Number of GPUs
+# gpu_ids = "0,1"                     # Specific GPU IDs
+# main_process_port = 29500           # Communication port
+
+# =============================================================================
+# TRAINING CONFIGURATION - Main training parameters
+# =============================================================================
+[train]
+# =============================================================================
+# MODEL PATHS - Core model files
+# =============================================================================
+
+# Task type (WAN-specific: t2v-A14B, i2v-A14B, t2i-A14B, etc.)
+task = "t2v-A14B"
+
+# Diffusion transformer model path
+dit = "models/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors"
+
+# VAE model path (for decoding latents to images)
+vae = "models/vae/wan_2.1_vae.safetensors"
+
+# Text encoder model path(s)
+t5 = "models/text_encoders/models_t5_umt5-xxl-enc-bf16.pth"
+
+# Dataset configuration file
+dataset_config = "dataset_config.toml"
+
+# =============================================================================
+# ATTENTION MECHANISMS - Choose one
+# =============================================================================
+
+# Use PyTorch's scaled dot product attention (recommended, fastest)
+sdpa = true
+
+# Alternative attention mechanisms (use only one)
+# flash_attn = false                  # FlashAttention (very fast, less memory)
+# xformers = false                    # xFormers (good compatibility)
+# sage_attn = false                   # SageAttention (experimental)
+
+# Required if using xformers
+# split_attn = false
+
+# =============================================================================
+# MEMORY OPTIMIZATION
+# =============================================================================
+
+# Mixed precision for training (fp16, bf16, no)
+mixed_precision = "fp16"
+
+# Run base model in FP8 (saves significant VRAM, may affect quality)
+fp8_base = true
+
+# Enable gradient checkpointing (saves memory, increases training time)
+gradient_checkpointing = true
+
+# Number of blocks to offload to CPU (0-36, higher = less VRAM, slower)
+blocks_to_swap = 0
+
+# Gradient accumulation steps (simulate larger batch size)
+gradient_accumulation_steps = 1
+
+# Enable low RAM mode (slower but uses less system RAM)
+lowram = false
+
+# Disable half precision for VAE (more stable, uses more VRAM)
+no_half_vae = false
+
+# =============================================================================
+# OPTIMIZER CONFIGURATION
+# =============================================================================
+
+# Optimizer type
+# adamw: Standard AdamW optimizer
+# adamw8bit: 8-bit AdamW (saves memory)
+# prodigy: Prodigy optimizer (automatic learning rate)
+# adan: Adan optimizer (adaptive)
+# lion: Lion optimizer (memory efficient)
+optimizer_type = "adamw"
+
+# Learning rate (critical parameter)
+# 1e-4 to 5e-4: typical range
+# 2e-4: good starting point for most models
+learning_rate = 3e-4
+
+# Optimizer-specific arguments
+optimizer_args = ["weight_decay=0.1"]
+
+# Gradient clipping (0 = disabled, 1.0 = typical value)
+max_grad_norm = 0
+
+# =============================================================================
+# LEARNING RATE SCHEDULER
+# =============================================================================
+
+# Scheduler type
+# constant: no change in learning rate
+# linear: linear decay to zero
+# cosine: cosine annealing
+# cosine_with_restarts: cosine with periodic restarts
+# polynomial: polynomial decay
+# constant_with_warmup: constant after warmup
+lr_scheduler = "polynomial"
+
+# Warmup steps (gradual LR increase at start)
+lr_warmup_steps = 100
+
+# Scheduler-specific parameters
+lr_scheduler_power = 8                    # For polynomial scheduler
+lr_scheduler_min_lr_ratio = "5e-5"       # Minimum LR as ratio of initial
+lr_scheduler_num_cycles = 1              # For cosine_with_restarts
+
+# Weight decay (L2 regularization, 0.01-0.1 typical)
+weight_decay = 0.01
+
+# =============================================================================
+# NETWORK ARCHITECTURE (LoRA/LyCORIS)
+# =============================================================================
+
+# Network module to use
+# networks.lora: Standard LoRA
+# networks.lora_wan: LoRA for WAN models
+# networks.lycoris: LyCORIS (more advanced adaptation)
+network_module = "networks.lora_wan"
+
+# LoRA rank/dimension (higher = more parameters, better fitting, larger file)
+# 4, 8, 16, 32, 64, 128 are common values
+network_dim = 16
+
+# LoRA alpha (scaling factor, typically half of dim or equal to dim)
+network_alpha = 16
+
+# LoRA dropout (regularization, 0.0-0.1)
+network_dropout = 0.0
+
+# Additional network arguments (module-specific)
+network_args = ""
+
+# Path to existing network weights (for resuming or fine-tuning)
+# network_weights = "path/to/existing/lora.safetensors"
+
+# =============================================================================
+# TRAINING SCHEDULE AND NOISE
+# =============================================================================
+
+# Timestep sampling strategy
+# uniform: uniform distribution across all timesteps
+# shift: shifted distribution (recommended for most models)
+# sigmoid: sigmoid-shaped distribution
+timestep_sampling = "shift"
+
+# Flow shift parameter (affects noise schedule, 1.0-7.0 typical)
+discrete_flow_shift = 1.0
+
+# Preserve original noise distribution shape
+preserve_distribution_shape = true
+
+# Timestep range (for specialized training)
+min_timestep = 0                         # Start timestep
+max_timestep = 875                       # End timestep (875 for low noise, 1000 for high noise)
+
+# Noise offset (adds slight noise bias, 0.0-0.1)
+noise_offset = 0.0
+
+# Multi-resolution noise (adds noise at different scales)
+multires_noise_iterations = 0            # Number of iterations (0 = disabled)
+multires_noise_discount = 0.3           # Discount factor
+
+# Zero terminal SNR (advanced noise parameterization)
+zero_terminal_snr = false
+
+# Use v-parameterization instead of epsilon
+v_parameterization = false
+
+# Debiased estimation loss (experimental)
+debiased_estimation_loss = false
+
+# =============================================================================
+# DATA LOADING
+# =============================================================================
+
+# Number of worker processes for data loading
+max_data_loader_n_workers = 2
+
+# Keep data loader workers alive between epochs (faster but more memory)
+persistent_data_loader_workers = true
+
+# Number of workers for dataset processing
+dataloader_num_workers = 0
+
+# Enable bucketing (group similar sized images/videos)
+enable_bucket = true
+
+# Disable upscaling in bucketing (only downscale to fit buckets)
+bucket_no_upscale = false
+
+# Bucket resolution steps (controls bucket size granularity)
+bucket_reso_steps = 64
+
+# Minimum and maximum bucket resolutions
+min_bucket_reso = 256
+max_bucket_reso = 1024
+
+# =============================================================================
+# TRAINING DURATION
+# =============================================================================
+
+# Maximum number of epochs (full passes through dataset)
+max_train_epochs = 100
+
+# Alternative: maximum number of steps (overrides epochs if > 0)
+max_train_steps = 0
+
+# Save model every N epochs
+save_every_n_epochs = 100
+
+# Alternative: save model every N steps
+save_every_n_steps = 0
+
+# =============================================================================
+# OUTPUT CONFIGURATION
+# =============================================================================
+
+# Output directory for saved models
+output_dir = "output"
+
+# Base name for output files
+output_name = "WAN22_LowNoise_MyModel_v1"
+
+# Save format (safetensors recommended, ckpt for compatibility)
+save_model_as = "safetensors"
+
+# Precision for saved model (fp16, bf16, float)
+save_precision = "fp16"
+
+# =============================================================================
+# METADATA (embedded in saved model)
+# =============================================================================
+
+# Model title (shown in UIs)
+metadata_title = "WAN22_LowNoise_MyModel_v1"
+
+# Author name
+metadata_author = "YourName"
+
+# Model description
+metadata_description = "Fine-tuned WAN 2.2 model for specific style/subject"
+
+# License information
+metadata_license = "MIT"
+
+# Tags (comma-separated)
+metadata_tags = "wan2.2,lora,video,lowres"
+
+# Training comment
+training_comment = "Trained on custom dataset with optimized settings"
+
+# =============================================================================
+# LOGGING AND MONITORING
+# =============================================================================
+
+# Logging directory
+logging_dir = "logs"
+
+# Logging backend (tensorboard, wandb, or empty for none)
+log_with = "tensorboard"
+
+# Log configuration at start
+log_config = true
+
+# Log learning rate changes
+log_lr = false
+
+# Weights & Biases settings (if using wandb)
+# wandb_project = "musubi-training"
+# wandb_run_name = "wan22-experiment-1"
+
+# =============================================================================
+# STATE MANAGEMENT (for resuming training)
+# =============================================================================
+
+# Save training state (optimizer, scheduler, random state)
+save_state = true
+
+# Path to state directory to resume from
+# resume = "output/model-state-epoch-50"
+
+# =============================================================================
+# VALIDATION AND SAMPLING
+# =============================================================================
+
+# Generate sample images/videos during training
+enable_sample = false
+
+# Generate sample at first epoch (before training starts)
+sample_at_first = false
+
+# Generate samples every N epochs
+sample_every_n_epochs = 10
+
+# Generate samples every N steps (alternative to epochs)
+sample_every_n_steps = 0
+
+# Path to file containing sample prompts
+# sample_prompts = "sample_prompts.txt"
+
+# Sampler to use for generation
+sample_sampler = "ddpm"                  # ddpm, deis, euler, euler_a
+
+# =============================================================================
+# CAPTION PROCESSING
+# =============================================================================
+
+# Number of tokens to keep at start of caption (0 = all)
+keep_tokens = 0
+
+# Shuffle caption tokens (data augmentation)
+shuffle_caption = false
+
+# Maximum length of captions (0 = no limit)
+max_token_length = 0
+
+# CLIP skip layers (1 = use all layers)
+clip_skip = 1
+
+# =============================================================================
+# PRIOR LOSS (for regularization)
+# =============================================================================
+
+# Weight for prior loss (usually 1.0 or disabled)
+prior_loss_weight = 1.0
+
+# =============================================================================
+# ADVANCED SETTINGS
+# =============================================================================
+
+# Random seed for reproducibility
+seed = 42
+
+# Cache text encoder outputs (speeds up training)
+cache_text_encoder_outputs = true
+
+# Cache latents (speeds up training)
+cache_latents = true
+
+# Full fp16 training (experimental, may be unstable)
+full_fp16 = false
+
+# Disable mixed precision for text encoder
+no_half_te = false
+
+# =============================================================================
+# EXPERIMENTAL FEATURES
+# =============================================================================
+
+# Enable memory efficient attention
+mem_eff_attn = false
+
+# Use 8-bit Adam optimizer variant
+use_8bit_adam = false
+
+# Enable Lion optimizer variant
+use_lion_optimizer = false
+
+# Minimum SNR gamma (signal-to-noise ratio weighting)
+min_snr_gamma = 0
+
+# Scale weight normalization
+scale_weight_norms = 0
+
+# Network alpha for different layers (advanced)
+# network_train_unet_only = false
+# network_train_text_encoder_only = false
+
+# =============================================================================
+# DATASET CONFIGURATION (can be inline or separate file)
+# =============================================================================
+[dataset]
+# Global dataset settings
+caption_extension = ".txt"
+batch_size = 1
+enable_bucket = true
+bucket_no_upscale = false
+
+# Video dataset example
+[[dataset.datasets]]
+resolution = [960, 544]                 # Target resolution [width, height]
+video_directory = "dataset/videos"      # Directory containing video files
+cache_directory = "dataset/cache/videos" # Cache directory (must be different per dataset)
+
+# Frame extraction method
+# "full": use all frames (recommended for complete motions)
+# "head": extract from beginning of video
+# "tail": extract from end of video
+# "uniform": extract evenly spaced frames
+# "slide": sliding window extraction
+frame_extraction = "full"
+
+# Maximum frames to use (follows N*4+1 pattern: 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49, 53, 57, 61, 65, 69, 73, 77, 81...)
+max_frames = 81
+
+# Source video framerate (for frame rate conversion)
+source_fps = 16.0
+
+# Dataset repeat factor (how many times to repeat this dataset per epoch)
+num_repeats = 1
+
+# Frame selection parameters (for non-"full" extraction)
+# target_frames = [1, 17, 33]         # Specific frame indices to extract
+# frame_stride = 1                    # Step size for frame extraction
+# frame_sample = 1                    # Number of frames to sample
+
+# Image dataset example (alternative to video)
+# [[dataset.datasets]]
+# resolution = [512, 512]
+# image_directory = "dataset/images"
+# cache_directory = "dataset/cache/images"
+# num_repeats = 1
+
+# =============================================================================
+# NOTES AND TIPS
+# =============================================================================
+
+# MEMORY OPTIMIZATION TIPS:
+# - Reduce batch_size to 1
+# - Enable fp8_base = true
+# - Increase blocks_to_swap (up to 36)
+# - Use gradient_checkpointing = true
+# - Reduce network_dim and max_frames
+
+# QUALITY vs SPEED TRADE-OFFS:
+# - Higher learning_rate = faster training, may miss details
+# - Higher network_dim = better quality, larger file size
+# - More max_frames = better motion, more VRAM needed
+# - fp8_base = much less VRAM, slight quality loss
+
+# COMMON ISSUES:
+# - OOM (Out of Memory): reduce batch_size, enable fp8_base, increase blocks_to_swap
+# - Poor quality: lower learning_rate, increase network_dim, check dataset quality
+# - Slow training: increase batch_size, use mixed_precision, optimize data loading
+
+# FRAMEWORK-SPECIFIC NOTES:
+# - WAN: Use network_module = "networks.lora_wan", task parameter required
+# - HunyuanVideo: Use network_module = "networks.lora", dual text encoders
+# - Flux: Different script names, check documentation

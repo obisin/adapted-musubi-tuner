@@ -1,0 +1,19 @@
+# =============================================================================
+# WAN DATASET CONFIGURATION - PURE DATASET ONLY
+# This file contains ONLY dataset configuration for musubi-tuner
+# =============================================================================
+
+# Global dataset settings
+[general]
+caption_extension = ".txt"
+batch_size = 1
+enable_bucket = true
+bucket_no_upscale = false
+
+# Image dataset configuration
+[[datasets]]
+resolution = [512, 512]         # [width, height] format
+image_directory = "data/input/giadanude"
+cache_directory = "data/cache/giadanude"
+num_repeats = 40                # High repeats for small dataset
+caption_extension = ".txt"

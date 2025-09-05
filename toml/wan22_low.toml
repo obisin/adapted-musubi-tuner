@@ -1,0 +1,125 @@
+# =============================================================================
+# MUSUBI TUNER - WAN 2.2 LOW NOISE TRAINING
+# Usage: python train.py config_wan22_low.toml
+# =============================================================================
+
+[runner]
+framework = "wan"               # Framework name (generates wan_cache_latents.py etc)
+skip_cache = false               # Skip caching if already done
+use_uv = true                   # Use uv package manager
+cuda_extra = "cu124"            # cu124 | cu128
+
+# =============================================================================
+# PATHS (auto-generated from framework unless specified)
+# =============================================================================
+[paths]
+# Paths auto-generated as: src/musubi_tuner/{framework}_{script_type}.py
+# Only specify if you need custom paths
+
+# =============================================================================
+# ACCELERATE CONFIGURATION
+# =============================================================================
+[accelerate]
+num_cpu_threads_per_process = 1
+num_processes = 1              # Force single GPU
+mixed_precision = "fp16"       # Set explicitly
+
+# =============================================================================
+# WAN 2.2 LOW NOISE TRAINING CONFIGURATION
+# =============================================================================
+[train]
+# Core model paths
+task = "t2v-A14B"
+#ckpt_path = "models/Wan2.1-T2V-14B"
+dit = "G:\\ComfyUI\\models\\diffusion_models\\wan2.2_t2v_low_noise_14B_fp16.safetensors"
+#
+#dit = "G:\\ComfyUI\\models\\diffusion_models\\wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors"
+vae = "G:\\ComfyUI\\models\\vae\\Wan2_1_VAE_bf16.safetensors"
+t5 = "G:\\ComfyUI\\models\\text_encoders\\t5xxl_fp8_e4m3fn_scaled.safetensors"
+dataset_config = "toml/wan22_low_dataset.toml"
+
+# Attention and precision
+xformers = true
+mixed_precision = "fp16"
+fp8_base = true
+gradient_checkpointing = true
+gradient_accumulation_steps = 1
+
+# Optimizer settings
+optimizer_type = "adamw"
+learning_rate = 3e-4
+optimizer_args = ["weight_decay=0.1"]
+max_grad_norm = 0.75
+lr_scheduler = "polynomial"
+lr_scheduler_power = 8
+lr_scheduler_min_lr_ratio = "5e-5"
+
+# Network configuration
+network_module = "networks.lora_wan"
+network_dim = 16                # Reduced from 32
+network_alpha = 16              # Reduced from 32
+
+# Training schedule and timesteps
+timestep_sampling = "shift"
+discrete_flow_shift = 1.0
+preserve_distribution_shape = true
+min_timestep = 0                # LOW NOISE: 0-875
+max_timestep = 875
+
+# Data loading
+max_data_loader_n_workers = 2
+
+# Training duration
+max_train_epochs = 3
+save_every_n_epochs = 1
+save_every_n_steps = 75
+save_state = true
+
+# Output settings
+output_dir = "data/output/giadanude"
+output_name = "WAN2.2-LowNoise_giadanude_v1"
+metadata_title = "WAN2.2-LowNoise_giadanude_v1"
+metadata_author = "obisin"
+
+lr_warmup_steps = 3
+
+network_dropout = 0.05
+auto_blocks_to_swap = true
+blocks_to_swap = 30
+seed = 91142069
+fp8_scaled = true
+# =============================================================================
+# DATASET CONFIGURATION
+# =============================================================================
+[cache_latents]
+dataset_config = "toml/wan22_low_dataset.toml"
+vae = "G:\\ComfyUI\\models\\vae\\Wan2_1_VAE_bf16.safetensors"
+#vae_cache_cpu = true
+batch_size = 1
+device = "cuda:1"
+skip_existing = true
+
+[cache_text_encoder]
+dataset_config = "toml/wan22_low_dataset.toml"
+t5 = "G:\\ComfyUI\\models\\text_encoders\\umt5-xxl-enc-fp8_e4m3fn.safetensors"
+batch_size = 16
+device = "cpu"
+num_workers = 1
+skip_existing = true
+
+# =============================================================================
+# DATASET DEFINITION (for wan22_low.toml file)
+# =============================================================================
+[dataset]
+# Global settings
+caption_extension = ".txt"
+batch_size = 1
+enable_bucket = true
+bucket_no_upscale = false
+
+[[dataset.datasets]]
+resolution = [512, 512]         # [width, height] format
+image_directory = "data/input/giadanude"
+cache_directory = "data/cache/giadanude"
+num_repeats = 40                # High repeats for small dataset
+caption_extension = ".txt"
