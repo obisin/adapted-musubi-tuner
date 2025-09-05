@@ -1,8 +1,12 @@
 # ADAPTED Musubi Tuner
 
-##I HAVE ADDED:
--Simple command line- only train.py file and config toml needed. e.g  python train.py toml\wan22_low.toml
--Auto allocate blocks to swap based on space avaiable, instead of manual.
+## I HAVE ADDED:
+- Simple command line - only train.py file and config toml needed. e.g  python train.py toml\wan22_low.toml
+- Auto allocate blocks to swap based on space avaiable, instead of manual.
+
+
+
+
 
 [English](./README.md) | [日本語](./README.ja.md)
 
