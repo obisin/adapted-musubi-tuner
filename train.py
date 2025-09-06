@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Musubi Tuner Training Wrapper
 Usage: python train.py path/to/config.toml
@@ -17,99 +18,93 @@ except ImportError:
     import tomli as tomllib
 
 
-def calculate_optimal_blocks_from_model(blocks, device, config):
-    """Calculate optimal blocks_to_swap using actual model blocks"""
-    if not torch.cuda.is_available():
-        print("WARNING: CUDA not available, using default blocks_to_swap=20")
-        return 20
-
-    # Check if VAE and text encoder are optimized/offloaded
-    train_config = config.get('train', {})
-    cache_latents_config = config.get('cache_latents', {})
-    cache_te_config = config.get('cache_text_encoder', {})
-
-    vae_on_cpu = train_config.get('vae_cache_cpu', False) or cache_latents_config.get('device') == 'cpu'
-    text_encoder_optimized = train_config.get('fp8_t5', False) or cache_te_config.get('device') == 'cpu'
-
-    # Cleanup and get memory state
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    device_props = torch.cuda.get_device_properties(device)
-    total_memory = device_props.total_memory
-    allocated_memory = torch.cuda.memory_allocated(device)
-    free_memory = total_memory - allocated_memory
-
-    print(f"GPU Memory: {free_memory / (1024 ** 3):.1f}GB free / {total_memory / (1024 ** 3):.1f}GB total")
-
-    # Calculate block sizes
-    block_allocation_data = []
-    for i, block in enumerate(blocks):
-        block_size = 0
-        for param in block.parameters():
-            block_size += param.numel() * param.element_size()
-        for buffer in block.buffers():
-            block_size += buffer.numel() * buffer.element_size()
-        block_allocation_data.append((block_size, i))
-
-    block_allocation_data.sort(reverse=True, key=lambda x: x[0])
-
-    # Adjust memory budget based on model placement
-    if vae_on_cpu and text_encoder_optimized:
-        memory_overhead_ratio = 0.2  # 20% for gradients + optimizer
-        print("VAE and text encoder optimized - maximizing GPU memory for model blocks")
-    elif vae_on_cpu or text_encoder_optimized:
-        memory_overhead_ratio = 0.3  # 30% overhead
-        print("Some models optimized")
-    else:
-        memory_overhead_ratio = 0.4  # 40% for all models + training
-        print("All models on GPU - conservative allocation")
-
-    memory_budget = free_memory * (1.0 - memory_overhead_ratio) * 0.9  # 10% safety margin
-
-    # Greedy allocation
-    allocated_memory = 0
-    gpu_blocks_count = 0
-
-    for block_size, block_idx in block_allocation_data:
-        if allocated_memory + block_size <= memory_budget:
-            allocated_memory += block_size
-            gpu_blocks_count += 1
-        else:
-            break
-
-    blocks_to_swap = len(blocks) - gpu_blocks_count
-    blocks_to_swap = max(1, min(blocks_to_swap, len(blocks) - 1))
-
-    # Be more aggressive if models are offloaded
-    if vae_on_cpu and text_encoder_optimized:
-        blocks_to_swap = max(1, blocks_to_swap - 5)
-
-    print(f"Auto-calculated blocks_to_swap: {blocks_to_swap}")
-    print(f"Keeping {len(blocks) - blocks_to_swap}/{len(blocks)} blocks on GPU")
-    print(f"Estimated model memory: {allocated_memory / (1024 ** 3):.1f}GB")
-
-    return blocks_to_swap
-
-
-def monkey_patch_offloading(config):
-    """Monkey patch custom_offloading_utils to support auto_blocks_to_swap"""
-    try:
-        from modules.custom_offloading_utils import ModelOffloader
-        original_init = ModelOffloader.__init__
-
-        def patched_init(self, block_type, blocks, num_blocks, blocks_to_swap, supports_backward, device, debug=False):
-            if config.get('train', {}).get('auto_blocks_to_swap', False) and blocks_to_swap is not None:
-                optimal_blocks = calculate_optimal_blocks_from_model(blocks, device, config)
-                print(f"Auto-calculated blocks_to_swap: {optimal_blocks} (was: {blocks_to_swap})")
-                blocks_to_swap = optimal_blocks
-
-            original_init(self, block_type, blocks, num_blocks, blocks_to_swap, supports_backward, device, debug)
-
-        ModelOffloader.__init__ = patched_init
-        print("Successfully monkey-patched ModelOffloader for auto_blocks_to_swap")
-    except ImportError as e:
-        print(f"Could not monkey patch offloading: {e}")
+# def calculate_optimal_blocks_from_model(blocks, device, config):
+#     """Calculate optimal blocks_to_swap using actual model blocks"""
+#     if not torch.cuda.is_available():
+#         print("WARNING: CUDA not available, using default blocks_to_swap=20")
+#         return 20
+#
+#     vae_on_cpu = True
+#     text_encoder_optimized = True
+#
+#     # Cleanup and get memory state
+#     gc.collect()
+#     torch.cuda.empty_cache()
+#
+#     device_props = torch.cuda.get_device_properties(device)
+#     total_memory = device_props.total_memory
+#     allocated_memory = torch.cuda.memory_allocated(device)
+#     free_memory = total_memory - allocated_memory
+#
+#     print(f"GPU Memory: {free_memory / (1024 ** 3):.1f}GB free / {total_memory / (1024 ** 3):.1f}GB total")
+#
+#     # Calculate block sizes
+#     block_allocation_data = []
+#     for i, block in enumerate(blocks):
+#         block_size = 0
+#         for param in block.parameters():
+#             block_size += param.numel() * param.element_size()
+#         for buffer in block.buffers():
+#             block_size += buffer.numel() * buffer.element_size()
+#         block_allocation_data.append((block_size, i))
+#
+#     block_allocation_data.sort(reverse=True, key=lambda x: x[0])
+#
+#     # Adjust memory budget based on model placement
+#     if vae_on_cpu and text_encoder_optimized:
+#         memory_overhead_ratio = 0.2  # 20% for gradients + optimizer
+#         print("VAE and text encoder optimized - maximizing GPU memory for model blocks")
+#     elif vae_on_cpu or text_encoder_optimized:
+#         memory_overhead_ratio = 0.3  # 30% overhead
+#         print("Some models optimized")
+#     else:
+#         memory_overhead_ratio = 0.4  # 40% for all models + training
+#         print("All models on GPU - conservative allocation")
+#
+#     memory_budget = free_memory * (1.0 - memory_overhead_ratio) * 0.9  # 10% safety margin
+#
+#     # Greedy allocation
+#     allocated_memory = 0
+#     gpu_blocks_count = 0
+#
+#     for block_size, block_idx in block_allocation_data:
+#         if allocated_memory + block_size <= memory_budget:
+#             allocated_memory += block_size
+#             gpu_blocks_count += 1
+#         else:
+#             break
+#
+#     blocks_to_swap = len(blocks) - gpu_blocks_count
+#     blocks_to_swap = max(1, min(blocks_to_swap, len(blocks) - 1))
+#
+#     # Be more aggressive if models are offloaded
+#     if vae_on_cpu and text_encoder_optimized:
+#         blocks_to_swap = max(1, blocks_to_swap - 5)
+#
+#     print(f"Auto-calculated blocks_to_swap: {blocks_to_swap}")
+#     print(f"Keeping {len(blocks) - blocks_to_swap}/{len(blocks)} blocks on GPU")
+#     print(f"Estimated model memory: {allocated_memory / (1024 ** 3):.1f}GB")
+#
+#     return blocks_to_swap
+#
+#
+# def patch_offloading(config):
+#     try:
+#         from musubi_tuner.modules.custom_offloading_utils import ModelOffloader
+#         original_init = ModelOffloader.__init__
+#
+#         def patched_init(self, block_type, blocks, num_blocks, blocks_to_swap, supports_backward, device, debug=False):
+#             if config.get('train', {}).get('auto_blocks_to_swap', False) and blocks_to_swap is not None:
+#                 optimal_blocks = calculate_optimal_blocks_from_model(blocks, device, config)
+#                 print(f"Auto-calculated blocks_to_swap: {optimal_blocks} (was: {blocks_to_swap})")
+#                 blocks_to_swap = optimal_blocks
+#
+#             original_init(self, block_type, blocks, num_blocks, blocks_to_swap, supports_backward, device, debug)
+#
+#         ModelOffloader.__init__ = patched_init
+#         print("Successfully monkey-patched ModelOffloader for auto_blocks_to_swap")
+#     except ImportError as e:
+#         print(f"Could not monkey patch offloading: {e}")
 
 
 
@@ -131,6 +126,10 @@ def build_args_from_dict(config_dict, prefix="--"):
     """Convert dictionary to command line arguments"""
     args = []
     for key, value in config_dict.items():
+
+        if key == 'auto_blocks_to_swap':
+            continue
+
         if value is True:
             args.append(f"{prefix}{key}")
         elif value is False or value is None:
@@ -157,8 +156,6 @@ def get_script_path(framework, script_type, paths_config):
 
 def main():
 
-
-
     if len(sys.argv) != 2:
         print("Usage: python train.py path/to/config.toml")
         sys.exit(1)
@@ -172,8 +169,6 @@ def main():
     with open(config_path, 'rb') as f:
         config = tomllib.load(f)
 
-    # Apply monkey patch for auto_blocks_to_swap
-    monkey_patch_offloading(config)
 
     # Get runner configuration
     runner = config.get('runner', {})
@@ -238,6 +233,25 @@ def main():
             train_script] + train_args
     else:
         train_cmd = ['accelerate', 'launch'] + accelerate_args + [train_script] + train_args
+
+    # Apply monkey patch for auto_blocks_to_swap
+    # patch_offloading(config)
+
+    if config.get('train', {}).get('auto_blocks_to_swap', False):
+        os.environ['AUTO_BLOCKS_TO_SWAP'] = 'true'
+
+        # Force VAE and text encoder optimizations when auto is enabled
+        train_config = config.get('train', {})
+        cache_latents_config = config.get('cache_latents', {})
+        cache_te_config = config.get('cache_text_encoder', {})
+
+        # Set vae_cache_cpu if not already set
+        if 'vae_cache_cpu' not in train_config:
+            train_config['vae_cache_cpu'] = True
+
+        # Set fp8_t5 if not already set
+        if 'fp8_t5' not in train_config:
+            train_config['fp8_t5'] = True
 
     run_command(train_cmd, f"Training ({framework.upper()})")
 
