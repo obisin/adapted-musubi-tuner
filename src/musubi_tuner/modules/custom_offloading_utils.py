@@ -4,6 +4,78 @@ import time
 from typing import Optional
 import torch
 import torch.nn as nn
+import os
+
+
+def calculate_optimal_blocks_from_model(blocks, device):
+    if not torch.cuda.is_available():
+        print("WARNING: CUDA not available, using default blocks_to_swap=20")
+        return 20
+
+    vae_on_cpu = True
+    text_encoder_optimized = True
+
+    # Cleanup and get memory state
+    clean_memory_on_device(device)
+
+    device_props = torch.cuda.get_device_properties(device)
+    total_memory = device_props.total_memory
+    allocated_memory = torch.cuda.memory_allocated(device)
+    free_memory = total_memory - allocated_memory
+
+    print(f"GPU Memory: {free_memory / (1024 ** 3):.1f}GB free / {total_memory / (1024 ** 3):.1f}GB total")
+
+    # Calculate block sizes
+    block_allocation_data = []
+    for i, block in enumerate(blocks):
+        block_size = 0
+        for param in block.parameters():
+            block_size += param.numel() * param.element_size()
+        for buffer in block.buffers():
+            block_size += buffer.numel() * buffer.element_size()
+        block_allocation_data.append((block_size, i))
+
+    block_allocation_data.sort(reverse=True, key=lambda x: x[0])
+
+    memory_overhead_ratio = 0.5  # 20% for gradients + optimizer
+
+    # print("VAE and text encoder optimized - maximizing GPU memory for model blocks")
+    # # Adjust memory budget based on model placement
+    # if vae_on_cpu and text_encoder_optimized:
+    #     memory_overhead_ratio = 0.55  # 20% for gradients + optimizer
+    #     print("VAE and text encoder optimized - maximizing GPU memory for model blocks")
+    # elif vae_on_cpu or text_encoder_optimized:
+    #     memory_overhead_ratio = 0.55  # 30% overhead
+    #     print("Some models optimized")
+    # else:
+    #     memory_overhead_ratio = 0.55  # 40% for all models + training
+    #     print("All models on GPU - conservative allocation")
+
+    memory_budget = free_memory * (1.0 - memory_overhead_ratio) * 0.9  # 10% safety margin
+
+    # Greedy allocation
+    allocated_memory = 0
+    gpu_blocks_count = 0
+
+    for block_size, block_idx in block_allocation_data:
+        if allocated_memory + block_size <= memory_budget:
+            allocated_memory += block_size
+            gpu_blocks_count += 1
+        else:
+            break
+
+    blocks_to_swap = len(blocks) - gpu_blocks_count
+    blocks_to_swap = max(1, min(blocks_to_swap, len(blocks) - 1))
+
+    # Be more aggressive if models are offloaded
+    if vae_on_cpu and text_encoder_optimized:
+        blocks_to_swap = max(1, blocks_to_swap - 5)
+
+    print(f"Auto-calculated blocks_to_swap: {blocks_to_swap}")
+    print(f"Keeping {len(blocks) - blocks_to_swap}/{len(blocks)} blocks on GPU")
+    print(f"Estimated model memory: {allocated_memory / (1024 ** 3):.1f}GB")
+
+    return blocks_to_swap
 
 
 def clean_memory_on_device(device: torch.device):
@@ -171,15 +243,21 @@ class ModelOffloader(Offloader):
     """
 
     def __init__(
-        self,
-        block_type: str,
-        blocks: list[nn.Module],
-        num_blocks: int,
-        blocks_to_swap: int,
-        supports_backward: bool,
-        device: torch.device,
-        debug: bool = False,
+            self,
+            block_type: str,
+            blocks: list[nn.Module],
+            num_blocks: int,
+            blocks_to_swap: int,
+            supports_backward: bool,
+            device: torch.device,
+            debug: bool = False,
     ):
+        # Auto-calculate if enabled
+        if os.getenv('AUTO_BLOCKS_TO_SWAP') == 'true' and blocks_to_swap is not None:
+            auto_calculated = calculate_optimal_blocks_from_model(blocks, device)
+            print(f"Overriding blocks_to_swap: {auto_calculated} (was: {blocks_to_swap})")
+            blocks_to_swap = auto_calculated
+
         super().__init__(block_type, num_blocks, blocks_to_swap, device, debug)
 
         self.supports_backward = supports_backward
