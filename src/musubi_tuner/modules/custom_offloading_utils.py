@@ -7,6 +7,29 @@ import torch.nn as nn
 import os
 
 
+def _detect_resume_mode():
+    # Check for resume indicators in environment or common paths
+    resume_indicators = [
+        # os.getenv('MUSUBI_RESUME'),
+        os.path.exists('toml/qwen.toml') and _check_toml_for_resume('toml/qwen.toml'),
+        os.path.exists('qwen.toml') and _check_toml_for_resume('qwen.toml'),
+    ]
+    return any(resume_indicators)
+
+
+def _check_toml_for_resume(toml_path):
+    try:
+        import toml
+        with open(toml_path, 'r') as f:
+            config = toml.load(f)
+            return bool(config.get('train', {}).get('resume'))
+    except:
+        return False
+
+
+_IS_RESUME_MODE = _detect_resume_mode()
+print("_IS_RESUME_MODE = ", _IS_RESUME_MODE)
+
 def calculate_optimal_blocks_from_model(blocks, device, config=None):
     """
     Calculate optimal blocks_to_swap based on research-backed memory analysis
@@ -115,7 +138,7 @@ def calculate_optimal_blocks_from_model(blocks, device, config=None):
     precision_multiplier = 1.0
     if mixed_precision in ['fp16', 'bf16']:
         # Mixed precision: 2 bytes model + 4 bytes master copy + optimizer overhead
-        precision_multiplier = 1.5  # Dual storage overhead
+        precision_multiplier = 1 #1.5  # Dual storage overhead
         print(f"Mixed precision {mixed_precision} - increased storage overhead")
     elif mixed_precision == 'fp32':
         precision_multiplier = 1.0
@@ -131,6 +154,7 @@ def calculate_optimal_blocks_from_model(blocks, device, config=None):
 
     # Image processing memory estimation using actual block sizes
     # Calculate activation memory based on actual image dimensions and batch size
+    precision_bytes = 1 # debug cause it might be cause to aggresisve mem reduction
     image_channels = 3  # RGB
     activation_memory_per_image = (resolution * resolution * image_channels * precision_bytes)
 
@@ -142,10 +166,10 @@ def calculate_optimal_blocks_from_model(blocks, device, config=None):
     total_activation_memory = activation_memory_per_image * batch_size * len(blocks) * activation_scaling_factor
 
     # Framework-specific adjustments
-    if framework == "qwen_image":
-        # QWEN vision-language models have higher activation overhead
-        total_activation_memory *= 1.25
-        print("QWEN image framework detected - increased activation memory estimate")
+    # if framework == "qwen_image":
+    #     # QWEN vision-language models have higher activation overhead
+    #     total_activation_memory *= 1.25
+    #     print("QWEN image framework detected - increased activation memory estimate")
 
     if gradient_checkpointing:
         total_activation_memory *= 0.3  # Gradient checkpointing reduces activation memory
@@ -166,7 +190,7 @@ def calculate_optimal_blocks_from_model(blocks, device, config=None):
         print(f"Gradient accumulation ({gradient_accumulation} steps) - reduced peak memory")
 
     # Standard safety margin
-    safety_margin = 0.1  # 10% safety margin across all hardware
+    safety_margin = 0.05  # 10% safety margin across all hardware
 
     # Total overhead calculation
     total_overhead = base_overhead + safety_margin
@@ -201,10 +225,13 @@ def calculate_optimal_blocks_from_model(blocks, device, config=None):
     # Final safety adjustment based on empirical findings
     if optimizer_type in ['adamw8bit', 'adamw_8bit', 'paged_adamw8bit']:
         # 8-bit optimizers are more memory stable, can be slightly more aggressive
-        blocks_to_swap = max(1, blocks_to_swap + 1)
+        blocks_to_swap = max(1, blocks_to_swap)
     else:
         # Standard optimizers need more conservative allocation
-        blocks_to_swap = max(1, blocks_to_swap + 2)
+        blocks_to_swap = max(1, blocks_to_swap + 1)
+
+    if blocks_to_swap >= len(blocks): # make sure at least one block is on the device
+        blocks_to_swap = blocks_to_swap - 1
 
     print(f"Auto-calculated blocks_to_swap: {blocks_to_swap}")
     print(f"Keeping {len(blocks) - blocks_to_swap}/{len(blocks)} blocks on GPU")
@@ -268,7 +295,10 @@ def swap_weight_devices_cuda(device: torch.device, layer_to_cpu: nn.Module, laye
         # cuda to cpu
         for module_to_cpu, module_to_cuda, cuda_data_view, cpu_data_view in weight_swap_jobs:
             cuda_data_view.record_stream(stream)
-            module_to_cpu.weight.data = cuda_data_view.data.to("cpu", non_blocking=True)
+            if _IS_RESUME_MODE:
+                module_to_cpu.weight.data = cuda_data_view.data.cpu()
+            else:
+                module_to_cpu.weight.data = cuda_data_view.data.to("cpu", non_blocking=True)
 
         stream.synchronize()
 
@@ -310,6 +340,15 @@ def weighs_to_device(layer: nn.Module, device: torch.device):
     for module in layer.modules():
         if hasattr(module, "weight") and module.weight is not None:
             module.weight.data = module.weight.data.to(device, non_blocking=True)
+
+def weighs_to_device_resume(layer: nn.Module, device: torch.device):
+    for module in layer.modules():
+        if hasattr(module, "weight") and module.weight is not None:
+            if device == "cpu" and module.weight.data.device.type == "cuda":
+                # Use .cpu() instead of .to("cpu", non_blocking=True) to avoid memory spike
+                module.weight.data = module.weight.data.cpu()
+            else:
+                module.weight.data = module.weight.data.to(device, non_blocking=True)
 
 
 class Offloader:
@@ -386,7 +425,11 @@ class ModelOffloader(Offloader):
             supports_backward: bool,
             device: torch.device,
             debug: bool = False,
+
     ):
+        # Auto-detect resume mode from environment/TOML
+        self.is_resume = _IS_RESUME_MODE
+
         # Auto-calculate if enabled
         if os.getenv('AUTO_BLOCKS_TO_SWAP') == 'true' and blocks_to_swap is not None:
             auto_calculated = calculate_optimal_blocks_from_model(blocks, device)
@@ -406,6 +449,7 @@ class ModelOffloader(Offloader):
                 if hook is not None:
                     handle = block.register_full_backward_hook(hook)
                     self.remove_handles.append(handle)
+
 
     def set_forward_only(self, forward_only: bool):
         self.forward_only = forward_only
@@ -454,7 +498,19 @@ class ModelOffloader(Offloader):
 
         for b in blocks[self.num_blocks - self.blocks_to_swap :]:
             b.to(self.device)  # move block to device first. this makes sure that buffers (non weights) are on the device
-            weighs_to_device(b, "cpu")  # make sure weights are on cpu
+            if self.is_resume:
+                # Safe CPU transfer during resume
+                weighs_to_device_resume(b, "cpu")
+                # print("[ModelOffloader] Resume used")
+            else:
+                weighs_to_device(b, "cpu")  # make sure weights are on cpu
+                # print("[ModelOffloader] Normal used")
+
+        # Turn off resume mode AFTER processing all blocks
+        if self.is_resume:
+            self.is_resume = False
+            if self.debug:
+                print("[ModelOffloader] Resume mode disabled after first complete call")
 
         synchronize_device(self.device)
         clean_memory_on_device(self.device)
