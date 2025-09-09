@@ -4,7 +4,7 @@
 - Simple command line - only train.py file and config toml needed. e.g  python train.py toml\wan22_low.toml
 - All command lines are now in the toml config file.
 - Auto allocate blocks to swap based on space avaiable, instead of manual.
-- Reduced startup memory from Resume from Checkpoint
+- Reduced startup memory from Resume from Checkpoint. to prevent OOM
 ##
 
 
